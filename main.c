@@ -184,6 +184,7 @@ bool rb_tree_contains(struct RBTree *tree, int n) {
 }
 
 // TODO this should be shorter and cleaner
+// TODO make this not recursive
 void rb_tree_remove(struct RBTree *tree, int n) {
     struct RBNode *node = rb_tree_find_node(tree, n);
     if (node == NULL) return;  // do nothing if value isn't in tree
@@ -191,20 +192,12 @@ void rb_tree_remove(struct RBTree *tree, int n) {
     if (node->children[0] != NULL) child_count++;
     if (node->children[1] != NULL) child_count++;
     if (child_count == 0) {
-        if (node->value < node->parent->value) {
-            node->parent->children[0] = NULL;
-        } else {
-            node->parent->children[1] = NULL;
-        }
+        node->parent->children[(node->value < node->parent->value) ? 0 : 1] = NULL;
         free(node);
     } else if (child_count == 1) {
         struct RBNode *child = (node->children[0] == NULL) ? node->children[1] : node->children[0];
         child->parent = node->parent;
-        if (node->value < node->parent->value) {
-            node->parent->children[0] = child;
-        } else {
-            node->parent->children[1] = child;
-        }
+        node->parent->children[(rb_tree_orientation(node) == LEFT) ? 0 : 1] = child;
         free(node);
     } else if (child_count == 2) {
         struct RBNode *inorder_successor = node->children[1];
