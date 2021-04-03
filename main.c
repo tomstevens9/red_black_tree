@@ -1,9 +1,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <inttypes.h>
+#include <stdarg.h>
+#include <math.h>
+
+// TODO add LEFT_CHILD and RIGHT_CHILD defines?
+
+#define LEFT 0
+#define RIGHT 1
+#define RB_TREE_DEBUG_LOG 1
 
 enum rb_color { RED, BLACK };
-enum rb_orientation { LEFT, RIGHT };
 
 struct RBNode {
     int value;
@@ -21,10 +29,29 @@ struct RBTree rb_tree_init() {
     return tree;
 }
 
-void debug_traverse(struct RBNode *node, int left_count, int right_count) {
-    printf("%d - (%d, %d)\n", node->value, left_count, right_count);
-    if (node->children[0] != NULL) debug_traverse(node->children[0], left_count + 1, right_count);
-    if (node->children[1] != NULL) debug_traverse(node->children[1], left_count, right_count + 1);
+
+void debug_log(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    if (RB_TREE_DEBUG_LOG) {
+        vfprintf(stderr, fmt, args);
+    }
+    va_end(args);
+}
+
+void debug_traverse(struct RBNode *node, int left_count, int right_count, int height) {
+    debug_log("(%d, %s)- ", node->value, (node->color == RED) ? "RED" : "BLACK");
+    if (height == 0) debug_log("ROOT");
+    for (int i = 1; i <= height; i++) {
+        if (left_count & (int) pow(2, i)) {
+            debug_log("LEFT ");
+        } else if(right_count & (int) pow(2, i)) {
+            debug_log("RIGHT ");
+        }
+    }
+    debug_log("\n");
+    if (node->children[0] != NULL) debug_traverse(node->children[0], left_count | (int) pow(2, height + 1), right_count, height + 1);
+    if (node->children[1] != NULL) debug_traverse(node->children[1], left_count, right_count | (int) pow(2, height + 1), height + 1);
 }
 
 
@@ -37,7 +64,7 @@ void rb_tree_swap_colors(struct RBNode *n1, struct RBNode *n2) {
 
 
 // TODO REPLACE AS MACRO?
-enum rb_orientation rb_tree_orientation(struct RBNode *node) {
+uint8_t rb_tree_orientation(struct RBNode *node) {
     // ASSUMES NODE IS NOT ROOT
     return (node->value < node->parent->value) ? LEFT : RIGHT;
 }
@@ -76,6 +103,9 @@ void rb_tree_left_rotate(struct RBTree *tree, struct RBNode *node) {
     }
     node->parent = child;
     node->children[1] = leftover;
+    if (leftover != NULL) {
+        leftover->parent = node;
+    }
     child->children[0] = node;
     if (child->parent == NULL) tree->root = child;
 }
@@ -96,6 +126,9 @@ void rb_tree_right_rotate(struct RBTree *tree, struct RBNode *node) {
     }
     node->parent = child;
     node->children[0] = leftover;
+    if (leftover != NULL) {
+        leftover->parent = node;
+    }
     child->children[1] = node;
     if (child->parent == NULL) tree->root = child;
 }
@@ -183,49 +216,121 @@ bool rb_tree_contains(struct RBTree *tree, int n) {
     return (node == NULL) ? false : true;
 }
 
+
+// TODO MAKE MACRO?
+bool rb_tree_is_black(struct RBNode *node) {
+    return (node == NULL || node->color == BLACK);
+}
+
+bool rb_tree_is_red(struct RBNode *node) {
+    return (node != NULL && node->color == RED);
+}
+
+bool rb_tree_has_red_child(struct RBNode *node) {
+    for (int i = 0; i < 2; i++) {  // TODO maybe more efficient if not loop?
+        if (rb_tree_is_red(node->children[i])) return true;
+    }
+    return false;
+}
+
+void rb_tree_fix_double_black(struct RBTree *tree, struct RBNode *node,  struct RBNode *parent) {
+    // double black node is passed in as parent and orientation instead of the node itself
+    // as double black node can be null, resulting in not being able to access it's parent
+    // with a ->parent reference
+    if (parent == NULL) {
+        node->color = BLACK;
+        return;
+    }
+    struct RBNode *sibling = (parent->children[LEFT] == node) ? parent->children[RIGHT] : parent->children[LEFT];
+    if (sibling->color == BLACK && rb_tree_is_black(sibling->children[LEFT]) && rb_tree_is_black(sibling->children[RIGHT])) {  // sibling is black and so are both it's children
+        rb_tree_swap_colors(sibling, parent);
+        sibling->color = RED;
+        if (sibling->color == BLACK) {  // parent was black and needs correcting
+            rb_tree_fix_double_black(tree, parent, parent->parent);
+        }
+    } else if (sibling->color == BLACK && rb_tree_has_red_child(sibling)) {
+        if (rb_tree_orientation(sibling) == RIGHT && rb_tree_is_red(sibling->children[LEFT])) {
+            sibling->children[LEFT]->color = BLACK;
+            rb_tree_right_rotate(tree, sibling);
+            rb_tree_left_rotate(tree, parent);
+        } else if (rb_tree_orientation(sibling) == RIGHT && rb_tree_is_red(sibling->children[RIGHT])) {
+            parent->color = RED;
+            rb_tree_left_rotate(tree, parent);
+        } else if (rb_tree_orientation(sibling) == LEFT && rb_tree_is_red(sibling->children[RIGHT])) {
+            sibling->children[RIGHT]->color = BLACK;
+            rb_tree_left_rotate(tree, sibling);
+            rb_tree_right_rotate(tree, parent);
+        } else if (rb_tree_orientation(sibling) == LEFT && rb_tree_is_red(sibling->children[LEFT])) {
+            parent->color = RED;
+            rb_tree_right_rotate(tree, parent);
+            
+        }
+   } else if (sibling->color == RED) {
+        printf("Here Z\n");
+        if (rb_tree_orientation(sibling) == RIGHT) {
+            rb_tree_left_rotate(tree, parent);
+            rb_tree_swap_colors(parent, parent->parent);
+            rb_tree_fix_double_black(tree, node, parent);
+        } else if (rb_tree_orientation(sibling) == LEFT) {
+            rb_tree_left_rotate(tree, parent);
+            rb_tree_swap_colors(parent, parent->parent);
+            rb_tree_fix_double_black(tree, node, parent);
+        }
+        printf("Complete Z\n");
+    }
+}
+
 // TODO this should be shorter and cleaner
 // TODO make this not recursive
+// TODO this is so messy
 void rb_tree_remove(struct RBTree *tree, int n) {
     struct RBNode *node = rb_tree_find_node(tree, n);
     if (node == NULL) return;  // do nothing if value isn't in tree
     int child_count = 0;
-    if (node->children[0] != NULL) child_count++;
-    if (node->children[1] != NULL) child_count++;
+    if (node->children[LEFT] != NULL) child_count++;
+    if (node->children[RIGHT] != NULL) child_count++;
     if (child_count == 0) {
-        node->parent->children[(node->value < node->parent->value) ? 0 : 1] = NULL;
+        if (node->parent == NULL) {
+            tree->root = NULL;
+        } else {
+            node->parent->children[rb_tree_orientation(node)] = NULL;
+            if (node->color == BLACK) {
+                rb_tree_fix_double_black(tree, NULL, node->parent);
+            }
+        }
         free(node);
-    } else if (child_count == 1) {
-        struct RBNode *child = (node->children[0] == NULL) ? node->children[1] : node->children[0];
-        child->parent = node->parent;
-        node->parent->children[(rb_tree_orientation(node) == LEFT) ? 0 : 1] = child;
-        free(node);
+    }
+    if (child_count == 1) {
+        struct RBNode *child = (node->children[LEFT] == NULL) ? node->children[RIGHT] : node->children[LEFT];
+        node->value = child->value;
+        node->children[rb_tree_orientation(child)] = NULL; // TODO can probably be done more efficiently
+        if (node->color == RED || child->color == RED) {
+            node->color = BLACK;
+        } else {
+            if (node->parent != NULL) rb_tree_fix_double_black(tree, node, node->parent);
+        }
+        free(child);
     } else if (child_count == 2) {
-        struct RBNode *inorder_successor = node->children[1];
-        while (inorder_successor->children[0] != NULL) inorder_successor = inorder_successor->children[0];
-        int inorder_successor_value = inorder_successor->value;
-        rb_tree_remove(tree, inorder_successor_value);
-        node->value = inorder_successor_value;
+        struct RBNode *inorder_predecessor = node->children[LEFT];
+        while (inorder_predecessor->children[RIGHT] != NULL) inorder_predecessor = inorder_predecessor->children[RIGHT];
+        int inorder_predecessor_value = inorder_predecessor->value;
+        rb_tree_remove(tree, inorder_predecessor_value);
+        node->value = inorder_predecessor_value;
     }
 }
 
 int main() {
+    int nums[] = {762, 736, 705, 130, 541, 783, 246, 18, 520, 607, 714, 834, 233, 304, 447, 318, 981, 51, 288, 18, 630, 655, 733, 204, 414, 667, 81, 804, 274, 544, 260, 856, 41, 488, 215, 769, 688, 666, 528, 849, 207, 820, 451, 9, 88, 669, 127, 289, 726, 203, 162, 16, 943, 954, 42, 102, 207, 926, 824, 435, 295, 898, 998, 635, 940, 218, 134, 406, 706, 260, 615, 622, 178, 617, 61, 248, 578, 652, 262, 486, 148, 519, 299, 415, 565, 764, 746, 409, 252, 670, 470, 603, 951, 590, 807, 951, 826, 416, 998, 836};
+    int shuffled_nums[] = {274, 470, 218, 630, 233, 622, 951, 726, 783, 520, 836, 652, 414, 16, 667, 769, 148, 807, 603, 746, 565, 998, 762, 134, 246, 666, 289, 299, 416, 669, 544, 304, 688, 204, 41, 488, 9, 764, 733, 127, 617, 820, 951, 655, 706, 615, 42, 898, 215, 940, 856, 736, 824, 447, 207, 834, 18, 954, 318, 61, 406, 849, 130, 295, 260, 826, 943, 541, 409, 451, 528, 926, 162, 102, 18, 203, 260, 590, 252, 262, 51, 714, 670, 998, 981, 248, 804, 207, 178, 607, 578, 435, 288, 88, 635, 705, 519, 486, 415, 81};
     struct RBTree tree = rb_tree_init();
-    rb_tree_add(&tree, 4);
-    rb_tree_add(&tree, 3);
-    rb_tree_add(&tree, 5);
-    rb_tree_add(&tree, 2);
-    rb_tree_add(&tree, 6);
-    rb_tree_add(&tree, 1);
-    rb_tree_add(&tree, 7);
-    debug_traverse(tree.root, 0, 0);
-    // rb_tree_remove(&tree, 10);
-    // printf("%s\n", (rb_tree_contains(&tree, 20)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 10)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 35)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 15)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 25)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 30)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 9)) ? "True" : "False");
-    // printf("%s\n", (rb_tree_contains(&tree, 14)) ? "True" : "False");
+    for (int i = 0; i < 100; i++) {
+        rb_tree_add(&tree, nums[i]);
+    }
+    for (int i = 0; i < 100; i++) {
+        if (i == 33) {
+            printf("----------------------------------\n");
+        }
+        rb_tree_remove(&tree, shuffled_nums[i]);
+    }
     return 0;
 }
